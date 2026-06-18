@@ -6,7 +6,6 @@ import requests
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 SEEN_FILE = "seen_items.txt"
 
-# 突き止めてもらったVRC Finderの神API URL
 API_URL = "https://vrcfinder.net/api/products?page=0&limit=22&sort=newest&free_only=true"
 
 def load_seen_items():
@@ -43,56 +42,66 @@ def check_vrc_finder():
         print(f"🚨 API取得エラー: {e}")
         return
 
-    # --- JSONのデータ構造を自動判別して中身を取り出す ---
     items = []
     if isinstance(data, list):
         items = data
     elif isinstance(data, dict):
-        # APIが辞書型だった場合、よくあるキーから商品リストを探す
         for key in ["products", "data", "items", "results"]:
             if key in data and isinstance(data[key], list):
                 items = data[key]
                 break
-        # もし上記で見つからず、特定の構造だったらここにデバッグ出力
-        if not items:
-            print(f"⚠️ データの解析に失敗しました。取得したJSONの形: {list(data.keys())}")
-            return
 
     if not items:
-        print("ℹ️ 新着アイテムが0件、または解析できませんでした。")
+        print("ℹ️ アイテムが取得できませんでした。")
         return
 
-    # 古い順に処理して最新が最後に通知されるように反転
+    print(f"📊 取得成功！現在の無料アイテム数: {len(items)}件")
+
+    # ========================================================
+    # 🧪 【ここからテスト用コード】 既読を無視して最初の1件を強制送信
+    # ========================================================
+    print("📢 [テスト] 1件だけ強制通知テストを実行します...")
+    test_item = items[0]  # 一番最初に見つかったアイテム
+    test_title = test_item.get("name") or test_item.get("title") or "タイトルなし"
+    test_id = str(test_item.get("id") or test_item.get("_id") or test_item.get("boothId") or "no_id")
+    test_url = test_item.get("boothUrl") or test_item.get("url")
+    if not test_url:
+        test_url = f"https://vrcfinder.net/ja/products/{test_id}"
+
+    test_message = {"content": f"【🧪テスト通知】{test_title}\n{test_url}"}
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json=test_message, timeout=10)
+        print("📢 テスト通知をDiscordに送信しました！確認してください。")
+    except Exception as e:
+        print(f"🚨 テスト通知の送信に失敗: {e}")
+    # ========================================================
+    # 🧪 【ここまでテスト用コード】
+    # ========================================================
+
+    # 本番用のループ処理（古い順に処理）
     items.reverse()
     
     for item in items:
-        # 商品の識別IDを取得（一意のキーを探索）
         item_id = str(item.get("id") or item.get("_id") or item.get("boothId") or "")
         if not item_id:
             continue
 
-        # 既読チェック
         if item_id in seen_ids or item_id in new_seen_ids:
             continue
 
-        # タイトルとリンクの取得（一般的なキーから安全に抽出）
         title = item.get("name") or item.get("title") or "無題のアセット"
-        
-        # BOOTHの直リンク、またはVRC Finderの商品ページURLを生成
         booth_url = item.get("boothUrl") or item.get("url")
         if not booth_url:
-            # URLがデータ内に無ければ、IDを使ってVRC Finderの詳細ページへ飛ばすリンクを生成
             booth_url = f"https://vrcfinder.net/ja/products/{item_id}"
 
         new_seen_ids.add(item_id)
         print(f"➔ 新着検知: {title}")
         
-        # Discord用のメッセージ作成
         message = {"content": f"【🎁VRChat無料新着】{title}\n{booth_url}"}
         
         try:
             requests.post(DISCORD_WEBHOOK_URL, json=message, timeout=10)
-            time.sleep(1) # 連投対策の1秒ウェイト
+            time.sleep(1)
         except Exception as e:
             print(f"🚨 Discord通知エラー: {e}")
 
