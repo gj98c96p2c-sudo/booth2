@@ -49,7 +49,7 @@ def get_item_description(item_url):
     return ""
 
 def call_gemini_api_json(prompt, max_retries=5):
-    """Gemini APIから確実なJSON形式で返答をもらうための関数（エラー耐性強化版）"""
+    """Gemini APIから確実なJSON形式で返答をもらうための関数（1分間15回制限 回避版）"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     
@@ -65,8 +65,8 @@ def call_gemini_api_json(prompt, max_retries=5):
             res = requests.post(url, headers=headers, json=payload, timeout=15)
             
             if res.status_code == 200:
-                # ⏱️【対策】1回成功したら5秒待つことで、1分間の回数制限(15回)を絶対に超えないようにする
-                time.sleep(5)  
+                # ⏱️【超重要】1分間に15回制限(1回あたり4秒)を絶対に超えないよう、成功直後に4.5秒確実に待つ
+                time.sleep(4.5)  
                 try:
                     json_str = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
                     return json.loads(json_str)
@@ -75,9 +75,9 @@ def call_gemini_api_json(prompt, max_retries=5):
                     return None
                     
             elif res.status_code == 429:
-                # ⏳【どさっと来た時の対策】429を検知したら、60秒間がっつり休んで制限が解除されるのを待つ
-                print(f"⏳ クォータ制限(429)を検知。制限解除のため【60秒間】しっかり休憩して再試行します... ({attempt + 1}/{max_retries})", flush=True)
-                time.sleep(60)
+                # ⏳ もし詰まって429が出たら、1分間枠がリセットされるまで「65秒」がっつり休む
+                print(f"⏳ 1分間の回数制限(429)を検知。枠リセットのため【65秒間】休憩して再試行します... ({attempt + 1}/{max_retries})", flush=True)
+                time.sleep(65)
                 continue
             else:
                 print(f"⚠️ APIエラー (Status: {res.status_code}) - {res.text[:200]}", flush=True)
@@ -237,4 +237,5 @@ def check_booth():
     print("=== 監視プログラム終了 ===", flush=True)
 
 if __name__ == "__main__":
+    check_bot() # 旧関数名から統合されたcheck_boothに変更されていた場合に対応するため、元のエントリーポイントに合わせます
     check_booth()
