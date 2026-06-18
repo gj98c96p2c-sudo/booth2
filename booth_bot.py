@@ -57,26 +57,7 @@ def check_vrc_finder():
 
     print(f"📊 取得成功！現在の無料アイテム数: {len(items)}件")
 
-    # ========================================================
-    # 🧪 【ここからテスト用コード】 既読を無視して最初の1件を強制送信
-    # ========================================================
-    print("📢 [テスト] 1件だけ強制通知テストを実行します...")
-    test_item = items[0]  # 一番最初に見つかったアイテム
-    test_title = test_item.get("name") or test_item.get("title") or "タイトルなし"
-    test_id = str(test_item.get("id") or test_item.get("_id") or test_item.get("boothId") or "no_id")
-    test_url = test_item.get("boothUrl") or test_item.get("url")
-    if not test_url:
-        test_url = f"https://vrcfinder.net/ja/products/{test_id}"
-
-    test_message = {"content": f"【🧪テスト通知】{test_title}\n{test_url}"}
-    try:
-        requests.post(DISCORD_WEBHOOK_URL, json=test_message, timeout=10)
-        print("📢 テスト通知をDiscordに送信しました！確認してください。")
-    except Exception as e:
-        print(f"🚨 テスト通知の送信に失敗: {e}")
-    # ========================================================
-    # 🧪 【ここまでテスト用コード】
-    # ========================================================
+   
 
     # 本番用のループ処理（古い順に処理）
     items.reverse()
