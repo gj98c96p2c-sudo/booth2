@@ -237,5 +237,4 @@ def check_booth():
     print("=== 監視プログラム終了 ===", flush=True)
 
 if __name__ == "__main__":
-    check_bot() # 旧関数名から統合されたcheck_boothに変更されていた場合に対応するため、元のエントリーポイントに合わせます
     check_booth()
