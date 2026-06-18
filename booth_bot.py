@@ -12,6 +12,8 @@ SEEN_FILE = "seen_items.txt"
 BOOTH_URL = "https://booth.pm/ja/search/VRChat?max_price=0&sort=new"
 
 # 【第1の関門】キーワードで即弾くリスト
+# ※「部屋」「ルーム」などは「部屋着」「ルームウェア」を巻き込んで弾くリスクがあります。
+#  もし欲しい服が届かない場合は、ここから「"部屋", "ルーム",」を消してみてください。
 IGNORE_KEYWORDS = [
     "ワールド", "world", "World", "WORLD", "家具", "インテリア", "ステージ", "stage",
     "部屋", "ルーム", "room", "ハウス", "house", "背景", "スカイボックス", "skybox",
@@ -39,8 +41,17 @@ def get_item_description(item_url):
         res = requests.get(item_url, headers=headers, timeout=10)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, "html.parser")
-            desc_tag = soup.find("div", class_="autolink") or soup.find("section", class_="item-description")
-            return desc_tag.get_text(separator="\n", strip=True)[:1000]
+            
+            # 🛠️【強化】BOOTHの新しいデザインのタグ名も含めて、幅広く説明文を探す
+            desc_tag = (
+                soup.find("div", class_="autolink") or 
+                soup.find("section", class_="item-description") or 
+                soup.find(class_="market-item-detail__description") or
+                soup.find(id="description")
+            )
+            
+            if desc_tag:
+                return desc_tag.get_text(separator="\n", strip=True)[:1000]
     except:
         pass
     return ""
@@ -69,30 +80,34 @@ def call_gemini_api_json(prompt, max_retries=3):
                     json_str = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
                     return json.loads(json_str)
                 except (KeyError, IndexError, json.JSONDecodeError) as e:
-                    print(f"⚠️ APIのレスポンス解析またはJSONパースに失敗しました: {e}")
+                    print(f"⚠️ APIのレスポンス解析またはJSONパースに失敗しました: {e}", flush=True)
                     return None
                     
             elif res.status_code == 429:
-                print(f"⏳ クォータ制限(429)を検知。{retry_delay}秒待機して再試行します... ({attempt + 1}/{max_retries})")
+                print(f"⏳ クォータ制限(429)を検知。{retry_delay}秒待機して再試行します... ({attempt + 1}/{max_retries})", flush=True)
                 time.sleep(retry_delay)
                 retry_delay *= 2
                 continue
             else:
-                print(f"⚠️ APIエラー (Status: {res.status_code}) - {res.text[:200]}")
+                print(f"⚠️ APIエラー (Status: {res.status_code}) - {res.text[:200]}", flush=True)
                 return None
                 
         except Exception as e:
-            print(f"⚠️ API通信中に例外が発生しました: {e}")
+            print(f"⚠️ API通信中に例外が発生しました: {e}", flush=True)
             time.sleep(2)
             
-    print("❌ 最大リトライ回数を超えたため、APIリクエストを断念します。")
+    print("❌ 最大リトライ回数を超えたため、APIリクエストを断念します。", flush=True)
     return None
 
 def ai_filter_combined(title, description):
     """カテゴリ判定と採点を1回で行う高速・低コスト版AI審査"""
     if not GEMINI_API_KEY:
-        print("⚠️ GEMINI_API_KEY が取得できていません。")
+        print("⚠️ GEMINI_API_KEY が取得できていません。", flush=True)
         return False
+
+    # 🛠️【安全装置】もしBOOTHの仕様変更等で説明文が空っぽだった場合の特別ルールをプロンプトに追加
+    if not description or description.strip() == "":
+        description = "（※重要：システムの都合上、説明文が取得できませんでした。商品タイトルのみから推測して、VRChat向けのアバター・衣装・小物・髪型・ギミック等である可能性が非常に高い場合は、特別にis_targetをtrue、scoreを15点として判定してください。単なるイラストやワールド等の除外対象に見える場合はfalseにしてください。）"
 
     prompt = f"""
     以下のVRChat向け商品について、審査を行い、指定のJSON形式でのみ出力してください。
@@ -121,13 +136,13 @@ def ai_filter_combined(title, description):
     
     result_json = call_gemini_api_json(prompt)
     if not result_json:
-        print(f"⚠️ AI審査のエラーのためスキップします: {title}")
+        print(f"⚠️ AI審査のエラーのためスキップします: {title}", flush=True)
         return False
         
     is_target = result_json.get("is_target", False)
     score = result_json.get("score", 0)
     
-    print(f"🤖 AI統合審査 [{title}] -> 対象内: {is_target} / 点数: {score}点")
+    print(f"🤖 AI統合審査 [{title}] -> 対象内: {is_target} / 点数: {score}点", flush=True)
     
     if is_target and isinstance(score, (int, float)) and score >= 13:
         return True
@@ -135,17 +150,17 @@ def ai_filter_combined(title, description):
     return False
 
 def check_booth():
-    print("=== BOOTH監視プログラム起動 ===")
+    print("=== BOOTH監視プログラム起動 ===", flush=True)
     
     if not DISCORD_WEBHOOK_URL:
-        print("❌ エラー: DISCORD_WEBHOOK_URL が設定されていません。")
+        print("❌ エラー: DISCORD_WEBHOOK_URL が設定されていません。", flush=True)
         return
 
     seen_ids = load_seen_items()
     new_seen_ids = seen_ids.copy()
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
     }
     
@@ -153,13 +168,13 @@ def check_booth():
         response = requests.get(BOOTH_URL, headers=headers, timeout=15)
         response.raise_for_status()
     except Exception as e:
-        print(f"❌ BOOTHからのデータ取得に失敗: {e}")
+        print(f"❌ BOOTHからのデータ取得に失敗: {e}", flush=True)
         return
 
     soup = BeautifulSoup(response.text, "html.parser")
     items = soup.find_all("div", class_="l-cards-5col_item") or soup.find_all("div", class_="grid-item") or soup.find_all("li", class_="item-card")
     
-    print(f"BOOTH上で見つかった商品ブロック数: {len(items)}件")
+    print(f"BOOTH上で見つかった商品ブロック数: {len(items)}件", flush=True)
     items.reverse()
 
     send_count = 0
@@ -182,19 +197,19 @@ def check_booth():
         title = title_tag.get_text(strip=True) if title_tag else link_tag.get_text(strip=True) or "無料の新着アイテム"
 
         if any(keyword.lower() in title.lower() for keyword in IGNORE_KEYWORDS):
-            print(f"🚫 キーワード検知によりスキップ: {title}")
+            print(f"🚫 キーワード検知によりスキップ: {title}", flush=True)
             new_seen_ids.add(item_id)
             continue
 
-        print(f"🔍 商品詳細を読み込み中... : {title}")
+        print(f"🔍 商品詳細を読み込み中... : {title}", flush=True)
         description = get_item_description(link)
         
         if not ai_filter_combined(title, description):
-            print(f"🤖 AI審査不合格: {title}")
+            print(f"🤖 AI審査不合格: {title}", flush=True)
             new_seen_ids.add(item_id)
             continue
 
-        print(f"➔ 【AI合格】新着アイテムを送信します: {title}")
+        print(f"➔ 【AI合格】新着アイテムを送信します: {title}", flush=True)
         message = {
             "content": f"【🎁 新着無料VRChatアイテム】\n**商品名**: {title}\n**価格**: 無料 (0円)\n**URL**: {link}"
         }
@@ -204,21 +219,21 @@ def check_booth():
         try:
             res = requests.post(DISCORD_WEBHOOK_URL, json=message, timeout=10)
             if res.status_code in [200, 204]:
-                print(f"【通知成功】: {title}")
+                print(f"【通知成功】: {title}", flush=True)
                 send_count += 1
             else:
-                print(f"⚠️ Discordへの送信に失敗 (Status: {res.status_code})")
+                print(f"⚠️ Discordへの送信に失敗 (Status: {res.status_code})", flush=True)
         except Exception as e:
-            print(f"❌ Discord送信エラー: {e}")
+            print(f"❌ Discord送信エラー: {e}", flush=True)
         
         # 🕵️【負荷対策】1つの商品の処理が終わったら1秒待機
         time.sleep(1)
 
     if send_count == 0:
-        print("💡 新しい通知対象はありませんでした。")
+        print("💡 新しい通知対象はありませんでした。", flush=True)
 
     save_seen_items(new_seen_ids)
-    print("=== 監視プログラム終了 ===")
+    print("=== 監視プログラム終了 ===", flush=True)
 
 if __name__ == "__main__":
     check_booth()
