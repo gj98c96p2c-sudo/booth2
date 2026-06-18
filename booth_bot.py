@@ -5,7 +5,8 @@ import requests
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 SEEN_FILE = "seen_items.txt"
-API_URL = "https://vrcfinder.net/api/products?page=0&limit=22&sort=newest&free_only=true"
+# 🛠 limit=50 から limit=100 に変更しました
+API_URL = "https://vrcfinder.net/api/products?page=0&limit=100&sort=newest&free_only=true"
 
 def load_seen_items():
     if os.path.exists(SEEN_FILE):
@@ -59,7 +60,6 @@ def check_vrc_finder():
     items.reverse()
     
     for item in items:
-        # VRC Finderのデータ構造（booth_id と ai_title）に完全最適化
         item_id = str(item.get("booth_id") or "").strip()
         if not item_id or item_id == "None":
             continue
@@ -68,10 +68,7 @@ def check_vrc_finder():
         if item_id in seen_ids or item_id in new_seen_ids:
             continue
 
-        # タイトルを取得（万が一無ければ予備を探す）
         title = item.get("ai_title") or item.get("name") or "無題のアセット"
-        
-        # 🔗 URLを本家BOOTHの直接リンクに組み立て
         booth_url = f"https://booth.pm/ja/items/{item_id}"
 
         new_seen_ids.add(item_id)
