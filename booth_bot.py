@@ -12,10 +12,20 @@ SEEN_FILE = "seen_items.txt"
 # VRChatの新着順・無料除く（全年齢向け）のURL
 BOOTH_URL = "https://booth.pm/ja/search/VRChat?max_price=0&sort=new"
 
-# 【検索のヒント】これが入っていれば通知
-TARGET_KEYWORDS = ["アバター", "衣装", "服", "ドレス", "髪", "ヘア", "小物", "ギミック", "VRC", "VRchat", "アクセ"]
-# 【除外のヒント】これが入っていたら無視
-IGNORE_KEYWORDS = ["ワールド", "world", "家具", "インテリア", "ステージ", "部屋", "ルーム", "ハウス", "背景", "スカイボックス", "bgm", "BGM", "音源", "ボイス", "楽曲", "テーマ"]
+# 【検索のヒント】これが入っていれば通知（最新版にアップデート）
+TARGET_KEYWORDS = [
+    "VRChat", "VRC", "3Dモデル", "オリジナル", "アバター", "avatar", 
+    "衣装", "素体", "モデル", "キャラクター", "キャラ", "base", "body",
+    "アイテクスチャ", "目テクスチャ", "フェイステクスチャ", "顔テクスチャ", 
+    "ボディテクスチャ", "肌テクスチャ", "face texture", "eye texture", "body texture"
+]
+
+# 【除外のヒント】これが入っていたら無視（最新版にアップデート）
+IGNORE_KEYWORDS = [
+    "ワールド", "world", "家具", "インテリア", "ステージ", "部屋", "ルーム", 
+    "ハウス", "背景", "スカイボックス", "bgm", "BGM", "音源", "ボイス", 
+    "楽曲", "テーマ", "パーティクル", "テクスチャ", "texture", "スキン", "skin"
+]
 
 # ==========================================
 # 🛠 処理用関数
@@ -26,10 +36,11 @@ def load_seen_items():
             return set(line.strip() for line in f if line.strip())
     return set()
 
-def save_seen_items(seen_ids):
+def save_seen_items(seen_links):
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
-        for item_id in sorted(seen_ids):
-            f.write(f"{item_id}\n")
+        # 数字ではなく、URLそのものをアルファベット順に並び替えて保存します
+        for link in sorted(seen_links):
+            f.write(f"{link}\n")
 
 # ==========================================
 # 🚀 メイン処理
@@ -42,8 +53,8 @@ def check_booth():
         print("🚨 エラー: GitHubのSecretsにDISCORD_WEBHOOK_URLが設定されていません。")
         sys.exit(1)
 
-    seen_ids = load_seen_items()
-    new_seen_ids = seen_ids.copy()
+    seen_links = load_seen_items()
+    new_seen_links = seen_links.copy()
 
     # スパム判定回避のためのブラウザ偽装ヘッダー
     headers = {
@@ -61,7 +72,7 @@ def check_booth():
         print(f"🚨 BOOTHの取得エラー: {e}")
         return
 
-    if not seen_ids:
+    if not seen_links:
         print("ℹ️ 初回起動のためリストを初期化します。通知は行いません。")
 
     # 古いものから順に処理し、時系列順にDiscordへ通知させる
@@ -72,7 +83,7 @@ def check_booth():
         if not link_tag:
             continue
         
-        # 1. URLの厳密な整形（特殊なプロトコル省略URL // にも対応）
+        # 1. URLの厳密な整形
         href = link_tag["href"]
         if href.startswith("http"):
             link = href
@@ -81,25 +92,26 @@ def check_booth():
         else:
             link = f"https://booth.pm{href}"
             
-        # 2. クエリパラメータ（?utm...等）を取り除き、純粋な商品IDを取得
-        item_id = link.split("?")[0].strip("/").split("/")[-1]
+        # クエリパラメータ（?utm...等）を取り除いた綺麗なURLをベースにする
+        clean_link = link.split("?")[0].strip()
         
-        # 既読ならスキップ
-        if item_id in seen_ids:
+        # 既読URLならスキップ
+        if clean_link in seen_links:
             continue
         
         # タイトル取得
         title_tag = item.find(class_="item-card__title") or item.find("h2")
         title = title_tag.get_text(strip=True) if title_tag else "無題"
         
-        # IDを既読リストに追加
-        new_seen_ids.add(item_id)
+        # 💡【テスト用】何回テストランしても既読リストを上書きしないよう、一時的に無効化しています。
+        # 15分おきの自動運用（本番）にする時は、下の1行の先頭の「#」を消してください。
+        # new_seen_links.add(clean_link)
 
         # 初回起動時はリストに保存するだけで通知判定はスキップ
-        if not seen_ids:
+        if not seen_links:
             continue
 
-        # キーワード判定（小文字に変換して効率的かつ漏れなくチェック）
+        # キーワード判定
         title_lower = title.lower()
         is_ignored = any(k.lower() in title_lower for k in IGNORE_KEYWORDS)
         is_target = any(k.lower() in title_lower for k in TARGET_KEYWORDS)
@@ -107,16 +119,18 @@ def check_booth():
         # 条件クリアでDiscordへ送信
         if not is_ignored and is_target:
             print(f"➔ 通知対象: {title}")
-            message = {"content": f"【🎁新着】{title}\n{link}"}
+            message = {"content": f"【🎁新着】{title}\n{clean_link}"}
             
             try:
                 requests.post(DISCORD_WEBHOOK_URL, json=message, timeout=10)
-                time.sleep(1) # Discordの連投制限（Rate Limit）対策
+                time.sleep(1) # Discordの連投制限対策
             except Exception as e:
                 print(f"🚨 Discord通知エラー: {e}")
 
-    # 最新の既読リストを上書き保存
-    save_seen_items(new_seen_ids)
+    # 💡【テスト用】テストラン中にファイルを更新しないよう、一時的に保存処理を止めています。
+    # 15分おきの自動運用（本番）にする時は、下の2行の先頭の「#」を消してください。
+    # save_seen_items(new_seen_links)
+    
     print("=== 監視終了 ===", flush=True)
 
 if __name__ == "__main__":
