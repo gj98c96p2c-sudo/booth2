@@ -4,7 +4,8 @@ import time
 import requests
 
 # 1. 各チャンネルのWebhook URLをGitHubから読み込みます
-WEBHOOK_FREE_ONLY = os.environ.get("DISCORD_WEBHOOK_FREE_ONLY")
+# 元の DISCORD_WEBHOOK_URL を「無料オンリー兼デフォルト」として使用します
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
 # 季節ごとのチャンネルURL
 SEASON_WEBHOOKS = {
@@ -39,8 +40,8 @@ def save_seen_items(seen_ids):
 
 def check_vrc_finder():
     print("=== VRC Finder 同時仕分け監視 開始 ===", flush=True)
-    if not WEBHOOK_FREE_ONLY:
-        print("🚨 エラー: DISCORD_WEBHOOK_FREE_ONLY が設定されていません。")
+    if not DISCORD_WEBHOOK_URL:
+        print("🚨 エラー: DISCORD_WEBHOOK_URL が設定されていません。")
         sys.exit(1)
 
     seen_ids = load_seen_items()
@@ -108,19 +109,18 @@ def check_vrc_finder():
                 except Exception as e:
                     print(f"🚨 {season_type}服チャンネル送信エラー: {e}")
             elif not is_free:
-                # 季節チャンネルURLが未登録かつ有料の場合は、安全策として無料チャンネルに借りて通知
+                # 季節チャンネルURLが未登録かつ有料の場合は、安全策として既存の無料チャンネルに通知
                 tag_name = f"{category} ｜ 🌟{season_type}服特集(有料: ￥{price})"
                 msg = {"content": f"【🎁VRChat新着｜{tag_name}】{title}\n{booth_url}"}
                 try:
-                    requests.post(WEBHOOK_FREE_ONLY, json=msg, timeout=10)
+                    requests.post(DISCORD_WEBHOOK_URL, json=msg, timeout=10)
                     time.sleep(0.5)
                     should_mark_seen = True
                 except Exception as e:
                     pass
 
-        # 🎯 【ルート②】無料の処理（季節関係なく、無料なら必ず無料チャンネルへ）
+        # 🎯 【ルート②】無料の処理（季節関係なく、無料なら必ず元々の無料チャンネルへ）
         if is_free:
-            # 無料チャンネル側でも、季節モノだったら一目で分かるようにスタンプを付けます
             if season_type:
                 tag_name_free = f"{category} ｜ 🎁無料アセット({season_type}モノ)"
             else:
@@ -128,7 +128,7 @@ def check_vrc_finder():
                 
             msg_free = {"content": f"【🎁VRChat新着｜{tag_name_free}】{title}\n{booth_url}"}
             try:
-                requests.post(WEBHOOK_FREE_ONLY, json=msg_free, timeout=10)
+                requests.post(DISCORD_WEBHOOK_URL, json=msg_free, timeout=10)
                 time.sleep(0.5)
                 should_mark_seen = True
             except Exception as e:
