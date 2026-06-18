@@ -1,16 +1,16 @@
 import os
 import time
-import json
 import requests
 from bs4 import BeautifulSoup
 
 # 設定項目
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") 
 SEEN_FILE = "seen_items.txt"
 BOOTH_URL = "https://booth.pm/ja/search/VRChat?max_price=0&sort=new"
 
-# 即弾くリスト（APIを無駄遣いしないための防波堤）
+# 【検索のヒント】これが入っていれば通知
+TARGET_KEYWORDS = ["アバター", "衣装", "服", "ドレス", "髪", "ヘア", "小物", "ギミック", "VRC", "VRchat", "アクセ"]
+# 【除外のヒント】これが入っていたら無視
 IGNORE_KEYWORDS = ["ワールド", "world", "家具", "インテリア", "ステージ", "部屋", "ルーム", "ハウス", "背景", "スカイボックス", "bgm", "BGM", "音源", "ボイス", "楽曲", "テーマ"]
 
 def load_seen_items():
@@ -24,69 +24,81 @@ def save_seen_items(seen_ids):
         for item_id in sorted(seen_ids):
             f.write(f"{item_id}\n")
 
-def call_gemini_api_json(prompt):
-    """タイトル判定専用の軽量API呼び出し"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-    payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"responseMimeType": "application/json"}}
-    
-    try:
-        res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=10)
-        if res.status_code == 200:
-            time.sleep(4) # 制限回避の待機
-            return json.loads(res.json()['candidates'][0]['content']['parts'][0]['text'])
-        return None
-    except:
-        return None
-
-def is_vrchat_item(title):
-    """タイトルだけをAIに投げて判定"""
-    prompt = f'商品タイトルが「VRChat向けのアバター・衣装・小物・ギミック」か判定してください。ワールド、家具、ツール、音楽、ロゴは除外。JSONで {{"is_target": true/false}} のみ出力して。タイトル: {title}'
-    result = call_gemini_api_json(prompt)
-    return result.get("is_target", False) if result else False
-
 def check_booth():
     print("=== 監視開始 ===", flush=True)
     seen_ids = load_seen_items()
     new_seen_ids = seen_ids.copy()
 
+    # BOOTHに弾かれにくくするためのヘッダー情報
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
+    }
+
     try:
-        response = requests.get(BOOTH_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        response = requests.get(BOOTH_URL, headers=headers, timeout=15)
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
-        items = soup.find_all("div", class_="l-cards-5col_item")
-    except:
+        items = soup.find_all("div", class_="l-cards-5col_item") or soup.find_all("li", class_="item-card")
+    except Exception as e:
+        print(f"取得エラー: {e}")
         return
 
-    # 初回起動時の既読保存（初回は通知なし）
-    if len(seen_ids) == 0:
+    # 初回起動時はすべて既読にして終了
+    if not seen_ids:
+        print("初回起動のためリストを初期化します。")
         for item in items:
-            link = item.find("a", href=True)
-            if link: new_seen_ids.add(link["href"].split("/")[-1])
+            link_tag = item.find("a", href=True)
+            if link_tag:
+                href = link_tag["href"]
+                temp_link = href if href.startswith("http") else f"https://booth.pm{href}"
+                temp_id = temp_link.split("/")[-1].split("?")[0]
+                new_seen_ids.add(temp_id)
         save_seen_items(new_seen_ids)
         return
 
+    # 古いものから順に処理
     items.reverse()
+    
     for item in items:
         link_tag = item.find("a", href=True)
-        if not link_tag: continue
+        if not link_tag:
+            continue
         
-        link = "https://booth.pm" + link_tag["href"]
-        item_id = link.split("/")[-1]
-        if item_id in seen_ids: continue
+        # URLの結合と、パラメータを取り除いた純粋なIDの取得
+        href = link_tag["href"]
+        link = href if href.startswith("http") else f"https://booth.pm{href}"
+        item_id = link.split("/")[-1].split("?")[0]
         
-        title = item.find(class_="item-card__title").get_text(strip=True)
+        # 既読スキップ
+        if item_id in seen_ids:
+            continue
+        
+        # タイトル取得
+        title_tag = item.find(class_="item-card__title") or item.find("h2")
+        title = title_tag.get_text(strip=True) if title_tag else "無題"
+        
+        # 既読リストに追加
         new_seen_ids.add(item_id)
 
-        # キーワードフィルター
-        if any(k in title for k in IGNORE_KEYWORDS): continue
+        # キーワード判定（小文字に変換して効率的にチェック）
+        title_lower = title.lower()
+        is_ignored = any(k.lower() in title_lower for k in IGNORE_KEYWORDS)
+        is_target = any(k.lower() in title_lower for k in TARGET_KEYWORDS)
         
-        # タイトルAI判定
-        if is_vrchat_item(title):
+        if not is_ignored and is_target:
             print(f"➔ 通知対象: {title}")
-            requests.post(DISCORD_WEBHOOK_URL, json={"content": f"【🎁新着】{title}\n{link}"})
-            time.sleep(1)
+            message = {"content": f"【🎁新着】{title}\n{link}"}
+            
+            try:
+                # Discordへ送信（タイムアウトも設定してフリーズを防止）
+                requests.post(DISCORD_WEBHOOK_URL, json=message, timeout=10)
+                time.sleep(1) # Discordの連投制限（Rate Limit）対策
+            except Exception as e:
+                print(f"Discord通知エラー: {e}")
 
     save_seen_items(new_seen_ids)
-    print("=== 終了 ===", flush=True)
+    print("=== 監視終了 ===", flush=True)
 
 if __name__ == "__main__":
     check_booth()
