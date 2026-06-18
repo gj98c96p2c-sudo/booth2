@@ -1,32 +1,82 @@
 import os
 import sys
 import time
+import json
 import requests
 from bs4 import BeautifulSoup
 
 # ==========================================
 # ⚙️ 設定項目
 # ==========================================
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+# GitHubのSecretsから読み込み（前後の余計な空白を自動除去）
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+
 SEEN_FILE = "seen_items.txt"
-# VRChatの新着順・無料除く（全年齢向け）のURL
 BOOTH_URL = "https://booth.pm/ja/search/VRChat?max_price=0&sort=new"
 
-# 【検索のヒント】これが入っていれば通知
-TARGET_KEYWORDS = [
-    "VRChat", "VRC", "3Dモデル", "オリジナル", "アバター", "avatar", 
-    "衣装", "服", "ドレス", "スーツ", "制服", "ワンピ", "素体", "モデル", "キャラクター", "キャラ", "base", "body",
-    "髪", "ヘア", "hair", "小物", "アクセ", "ギミック", "アニメーション",
-    "アイテクスチャ", "目テクスチャ", "フェイステクスチャ", "顔テクスチャ", 
-    "ボディテクスチャ", "肌テクスチャ", "face texture", "eye texture", "body texture"
-]
-
-# 【除外のヒント】これが入っていたら無視
+# 明らかなノイズ（ワールドやBGMなど）を事前に弾くリスト（AIの節約と速度向上のため）
 IGNORE_KEYWORDS = [
     "ワールド", "world", "家具", "インテリア", "ステージ", "部屋", "ルーム", 
     "ハウス", "背景", "スカイボックス", "bgm", "BGM", "音源", "ボイス", 
     "楽曲", "テーマ", "パーティクル"
 ]
+
+# ==========================================
+# 🧠 超堅牢版：AI判定関数（Gemini API / 構造化出力）
+# ==========================================
+def is_vrchat_related_by_ai(title):
+    # APIキーが設定されていない場合は、安全のためすべて通知する
+    if not GEMINI_API_KEY:
+        print("ℹ️ GEMINI_API_KEYが未設定のため、AI判定をスキップして通知します。")
+        return True
+        
+    # 最新の安定したGeminiモデルのエンドポイント
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    
+    # 💡一発成功のための仕掛け：AIに必ず指定したJSON形式で答えさせるスキーマを設定
+    payload = {
+        "contents": [{
+            "parts": [{
+                "text": (
+                    "Analyze the following BOOTH product title and determine if it is a VRChat-related asset "
+                    "(such as an avatar, clothing, outfit, 3D model, hair, texture, pose, animation, gimmick, accessory, eye/face/body texture, etc.). "
+                    f"Title: {title}"
+                )
+            }]
+        }],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": {
+                "type": "OBJECT",
+                "properties": {
+                    "related": {
+                        "type": "BOOLEAN",
+                        "description": "True if the title is related to VRChat assets, False otherwise."
+                    }
+                },
+                "required": ["related"]
+            }
+        }
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        response.raise_for_status()
+        res_json = response.json()
+        
+        # AIが返したJSON文字列を解析
+        text_response = res_json['candidates'][0]['content']['parts'][0]['text'].strip()
+        result_data = json.loads(text_response)
+        
+        is_related = result_data.get("related", True)
+        print(f"🤖 AI判定中... [{title}] -> 結果: {is_related}")
+        return is_related
+
+    except Exception as e:
+        # 万が一AI側でエラーが起きてもボットを止めず、安全のために通知対象（True）にする
+        print(f"⚠️ AI判定でエラー（またはパース失敗）が発生したため、念のため通知対象にします: {e}")
+        return True
 
 # ==========================================
 # 🛠 処理用関数
@@ -39,7 +89,7 @@ def load_seen_items():
 
 def save_seen_items(seen_links):
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
-        # URLそのものをアルファベット順に並び替えて保存
+        # URLをアルファベット順に綺麗に並び替えて保存
         for link in sorted(seen_links):
             f.write(f"{link}\n")
 
@@ -49,7 +99,6 @@ def save_seen_items(seen_links):
 def check_booth():
     print("=== 監視開始 ===", flush=True)
     
-    # 致命的エラー検知：Discord URLが設定されていない場合は強制終了
     if not DISCORD_WEBHOOK_URL:
         print("🚨 エラー: GitHubのSecretsにDISCORD_WEBHOOK_URLが設定されていません。")
         sys.exit(1)
@@ -57,7 +106,6 @@ def check_booth():
     seen_links = load_seen_items()
     new_seen_links = seen_links.copy()
 
-    # コピペによる自動改行バグを防ぐ安全なヘッダー定義
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -76,7 +124,7 @@ def check_booth():
         print(f"🚨 BOOTHの取得エラー: {e}")
         return
 
-    # 古いものから順に処理し、時系列順にDiscordへ通知させる
+    # 古い順に並び替えて時系列順にDiscordへ通知
     items.reverse()
     
     for item in items:
@@ -84,7 +132,6 @@ def check_booth():
         if not link_tag:
             continue
         
-        # URLの整形
         href = link_tag["href"]
         if href.startswith("http"):
             link = href
@@ -93,39 +140,37 @@ def check_booth():
         else:
             link = f"https://booth.pm{href}"
             
-        # クエリパラメータ（?utm...等）を取り除いた綺麗なURL
         clean_link = link.split("?")[0].strip()
         
-        # 既読URLならスキップ
+        # 既に通知済みのURLなら完全にスルー
         if clean_link in seen_links:
             continue
         
-        # タイトル取得
         title_tag = item.find(class_="item-card__title") or item.find("h2")
         title = title_tag.get_text(strip=True) if title_tag else "無題"
         
-        # 新しいURLを既読リストに追加（本番用）
+        # 既読リストに即座に追加
         new_seen_links.add(clean_link)
 
-        # キーワード判定
+        # 1. 事前の簡易除外チェック
         title_lower = title.lower()
-        is_ignored = any(k.lower() in title_lower for k in IGNORE_KEYWORDS)
-        is_target = any(k.lower() in title_lower for k in TARGET_KEYWORDS)
+        if any(k.lower() in title_lower for k in IGNORE_KEYWORDS):
+            print(f"⏭️ キーワード除外: [{title}]")
+            continue
         
-        # 条件クリアでDiscordへ送信（※初回実行時でも即通知されます）
-        if not is_ignored and is_target:
-            print(f"➔ 通知対象: {title}")
+        # 2. AIによる精密検証（ここでVRChat関連アセットかを100%見極める）
+        if is_vrchat_related_by_ai(title):
+            print(f"➔ 通知対象確定: {title}")
             message = {"content": f"【🎁新着】{title}\n{clean_link}"}
             
             try:
                 requests.post(DISCORD_WEBHOOK_URL, json=message, timeout=10)
-                time.sleep(1) # Discordの連投制限対策
+                time.sleep(1) # 連投エラー回避のためのウェイト
             except Exception as e:
                 print(f"🚨 Discord通知エラー: {e}")
 
-    # 最新の既読リストを上書き保存
+    # 確実にURL形式で最新のリストを上書き保存
     save_seen_items(new_seen_links)
-    
     print("=== 監視終了 ===", flush=True)
 
 if __name__ == "__main__":
