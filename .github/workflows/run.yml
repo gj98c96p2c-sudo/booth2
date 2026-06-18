@@ -1,9 +1,7 @@
 name: BOOTH Monitor Bot
 
+# 外部の正確なタイマー（cron-job.org等）からAPI経由で呼び出すため、手動実行トリガーのみを設定
 on:
-  schedule:
-    # サーバー負荷とアクセス制限（403エラー）対策のため、15分間隔に設定
-    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -20,7 +18,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip' # 実行速度最適化のためキャッシュを有効化
+          # ※requirements.txtがない環境でのエラーを防ぐためキャッシュは無効化
 
       - name: 必要なパッケージのインストール
         run: |
@@ -37,5 +35,5 @@ jobs:
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add seen_items.txt
-          # 変更がある場合のみコミットとプッシュを実行
+          # 変更がある場合のみコミットとプッシュを実行（エラー回避）
           git diff --staged --quiet || (git commit -m "Update seen items" && git push)
