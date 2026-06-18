@@ -1,49 +1,55 @@
-name: VRC Finder API Monitor Bot
+name: VRChat Booth Bot
 
 on:
-  workflow_dispatch:
-  repository_dispatch:
-    types: ["*"]
   schedule:
-    - cron: '*/15 * * * *' # 15分おきの爆速検知に復活！
-
-permissions:
-  contents: write
+    # 🕒 15分おきに自動実行する設定（世界標準時なので日本の時間とはズレて見えますがこれで合っています）
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    # 🛠️ GitHubの画面からいつでも手動でボタンを押してテスト起動できるようにする設定
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    steps:
-      - name: リポジトリのチェックアウト
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    
+    # 既読リスト（seen_items.txt）を保存するために、GitHubへの書き込み権限を許可します
+    permissions:
+      contents: write
 
-      - name: Pythonのセットアップ
-        uses: actions/setup-python@v5
+    steps:
+      # 1. GitHubにあるあなたのプログラム一式をサーバーにダウンロード
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. サーバーにPythonを使えるようにセットアップ
+      - name: Set up Python
+        uses: actions/platform/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 必要なパッケージのインストール
+      # 3. ボットに必要な「requests」というライブラリをインストール
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: ボットの実行
+      # 4. 【超重要】ステップ1で登録した5つの暗号URLを、プログラムに引き渡して実行！
+      - name: Run Booth Bot
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL:     ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_SPRING:   ${{ secrets.DISCORD_WEBHOOK_SPRING }}
+          DISCORD_WEBHOOK_SUMMER:   ${{ secrets.DISCORD_WEBHOOK_SUMMER }}
+          DISCORD_WEBHOOK_AUTUMN:   ${{ secrets.DISCORD_WEBHOOK_AUTUMN }}
+          DISCORD_WEBHOOK_WINTER:   ${{ secrets.DISCORD_WEBHOOK_WINTER }}
         run: python booth_bot.py
 
-      # 今までの完璧なGit Commit & Push機構をそのまま利用
-      - name: 既読リストの変更を保存 (Commit & Push)
+      # 5. 今回新しく通知したアセット（既読リスト）を保存してGitHubに書き戻す
+      - name: Commit and Push seen_items.txt
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add seen_items.txt
-          if ! git diff --cached --quiet; then
-            git commit -m "🤖 既読リストの更新 [skip ci]"
-            git pull --rebase origin main
-            git push origin main
-          else
-            echo "既読リストに変更はありません。"
+          # seen_items.txt に変更（新しい既読）があれば保存する
+          if [ -f "seen_items.txt" ]; then
+            git add seen_items.txt
+            git commit -m "Update seen items [skip ci]" || echo "No changes to commit"
+            git push
           fi
