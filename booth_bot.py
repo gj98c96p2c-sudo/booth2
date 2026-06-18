@@ -39,7 +39,7 @@ def load_seen_items():
 
 def save_seen_items(seen_links):
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
-        # 数字ではなく、URLそのものをアルファベット順に並び替えて保存します
+        # URLそのものをアルファベット順に並び替えて保存します
         for link in sorted(seen_links):
             f.write(f"{link}\n")
 
@@ -57,6 +57,84 @@ def check_booth():
     seen_links = load_seen_items()
     new_seen_links = seen_links.copy()
 
-    # スパム判定回避のためのブラウザ偽装ヘッダー
+    # 🛠 修正ポイント：コピペで改行バグが起きないよう、パーツごとに分割して結合する安全な書き方に変更しました
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/5
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
+    }
+
+    try:
+        response = requests.get(BOOTH_URL, headers=headers, timeout=15)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        # サイト構造の変更に備えて2パターンのクラスを検索
+        items = soup.find_all("div", class_="l-cards-5col_item") or soup.find_all("li", class_="item-card")
+    except Exception as e:
+        print(f"🚨 BOOTHの取得エラー: {e}")
+        return
+
+    if not seen_links:
+        print("ℹ️ 初回起動のためリストを初期化します。通知は行いません。")
+
+    # 古いものから順に処理し、時系列順にDiscordへ通知させる
+    items.reverse()
+    
+    for item in items:
+        link_tag = item.find("a", href=True)
+        if not link_tag:
+            continue
+        
+        # 1. URLの厳密な整形
+        href = link_tag["href"]
+        if href.startswith("http"):
+            link = href
+        elif href.startswith("//"):
+            link = f"https:{href}"
+        else:
+            link = f"https://booth.pm{href}"
+            
+        # クエリパラメータ（?utm...等）を取り除いた綺麗なURLをベースにする
+        clean_link = link.split("?")[0].strip()
+        
+        # 既読URLならスキップ
+        if clean_link in seen_links:
+            continue
+        
+        # タイトル取得
+        title_tag = item.find(class_="item-card__title") or item.find("h2")
+        title = title_tag.get_text(strip=True) if title_tag else "無題"
+        
+        # 新しいURLを既読リストに追加（本番用）
+        new_seen_links.add(clean_link)
+
+        # 初回起動時はリストに保存するだけで通知判定はスキップ
+        if not seen_links:
+            continue
+
+        # キーワード判定
+        title_lower = title.lower()
+        is_ignored = any(k.lower() in title_lower for k in IGNORE_KEYWORDS)
+        is_target = any(k.lower() in title_lower for k in TARGET_KEYWORDS)
+        
+        # 条件クリアでDiscordへ送信
+        if not is_ignored and is_target:
+            print(f"➔ 通知対象: {title}")
+            message = {"content": f"【🎁新着】{title}\n{clean_link}"}
+            
+            try:
+                requests.post(DISCORD_WEBHOOK_URL, json=message, timeout=10)
+                time.sleep(1) # Discordの連投制限対策
+            except Exception as e:
+                print(f"🚨 Discord通知エラー: {e}")
+
+    # 最新の既読リストを上書き保存（本番用）
+    save_seen_items(new_seen_links)
+    
+    print("=== 監視終了 ===", flush=True)
+
+if __name__ == "__main__":
+    check_booth()
