@@ -1,7 +1,6 @@
 name: BOOTH Monitor Bot
 
 on:
-  # cron-job.org や手動起動、すべてのトリガーに対応
   workflow_dispatch:
   repository_dispatch:
     types: ["*"]
@@ -10,6 +9,10 @@ on:
       - main
   schedule:
     - cron: '*/15 * * * *'
+
+# 💡 ここを追加することで、GitHub Actionsに「ファイルを保存する権限」を与えて403エラーを解決します
+permissions:
+  contents: write
 
 jobs:
   run-bot:
@@ -32,7 +35,6 @@ jobs:
       - name: ボットの実行
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python booth_bot.py
 
       - name: 既読リストの変更を保存 (Commit & Push)
@@ -40,7 +42,6 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add seen_items.txt
-          # 既読リストに変化があった時だけ保存する（無限ループ防止）
           if ! git diff --cached --quiet; then
             git commit -m "🤖 既読リストの更新 [skip ci]"
             git push
