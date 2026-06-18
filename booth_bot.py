@@ -31,7 +31,7 @@ def save_seen_items(seen_ids):
 
 def get_item_description(item_url):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    time.sleep(1)
+    time.sleep(1) # BOOTHへの負荷対策
     try:
         res = requests.get(item_url, headers=headers, timeout=10)
         if res.status_code == 200:
@@ -48,8 +48,8 @@ def get_item_description(item_url):
         pass
     return ""
 
-def call_gemini_api_json(prompt, max_retries=3):
-    """Gemini APIから確実なJSON形式で返答をもらうための関数"""
+def call_gemini_api_json(prompt, max_retries=5):
+    """Gemini APIから確実なJSON形式で返答をもらうための関数（エラー耐性強化版）"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     
@@ -59,31 +59,32 @@ def call_gemini_api_json(prompt, max_retries=3):
             "responseMimeType": "application/json"
         }
     }
-    
-    retry_delay = 10
 
     for attempt in range(max_retries):
         try:
             res = requests.post(url, headers=headers, json=payload, timeout=15)
+            
             if res.status_code == 200:
-                time.sleep(4)  # 連続リクエスト防止
+                # ⏱️【対策】1回成功したら5秒待つことで、1分間の回数制限(15回)を絶対に超えないようにする
+                time.sleep(5)  
                 try:
                     json_str = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
                     return json.loads(json_str)
                 except (KeyError, IndexError, json.JSONDecodeError) as e:
                     print(f"⚠️ APIのレスポンス解析またはJSONパースに失敗しました: {e}", flush=True)
                     return None
+                    
             elif res.status_code == 429:
-                print(f"⏳ クォータ制限(429)を検知。{retry_delay}秒待機して再試行します... ({attempt + 1}/{max_retries})", flush=True)
-                time.sleep(retry_delay)
-                retry_delay *= 2
+                # ⏳【どさっと来た時の対策】429を検知したら、60秒間がっつり休んで制限が解除されるのを待つ
+                print(f"⏳ クォータ制限(429)を検知。制限解除のため【60秒間】しっかり休憩して再試行します... ({attempt + 1}/{max_retries})", flush=True)
+                time.sleep(60)
                 continue
             else:
                 print(f"⚠️ APIエラー (Status: {res.status_code}) - {res.text[:200]}", flush=True)
                 return None
         except Exception as e:
             print(f"⚠️ API通信中に例外が発生しました: {e}", flush=True)
-            time.sleep(2)
+            time.sleep(5)
             
     print("❌ 最大リトライ回数を超えたため、APIリクエストを断念します。", flush=True)
     return None
@@ -164,11 +165,9 @@ def check_booth():
     
     print(f"BOOTH上で見つかった商品ブロック数: {len(items)}件", flush=True)
 
-    # 🛠️【ここが超重要：429エラー完全対策】
-    # 初めて起動した（既読リストが空の）場合は、今ある60件をすべて「既読」にして終了します。
+    # 初回起動時はすべて既読にする（APIパンク防止）
     if len(seen_ids) == 0:
         print("💡 初回起動を検知しました。過去の古い商品60件をすべて『確認済み』として保存します。", flush=True)
-        print("💡 これにより、次回（1時間後）から投稿される『本当の新着アイテム』だけを狙い撃ちして、AIエラーを防ぎます！", flush=True)
         for item in items:
             link_tag = item.find("a", class_="item-card__title") or item.find("a", href=True)
             if link_tag and link_tag.get("href"):
@@ -228,6 +227,7 @@ def check_booth():
         except Exception as e:
             print(f"❌ Discord送信エラー: {e}", flush=True)
         
+        # 🕵️ Discord連投対策の1秒待機
         time.sleep(1)
 
     if send_count == 0:
