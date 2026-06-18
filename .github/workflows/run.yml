@@ -2,14 +2,14 @@ name: BOOTH Monitor Bot
 
 on:
   schedule:
-    - cron: '0 * * * *' # 1時間ごとに自動実行
-  workflow_dispatch: # 手動実行ボタン
+    - cron: '*/5 * * * *' # 🌟5分ごとに自動実行（遅延の可能性あり）
+  workflow_dispatch: # 🌟手動で今すぐ動かすボタン
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 🌟ここが超重要！ファイルを上書き保存する権限
+      contents: write # 既読リストを保存するために必須
 
     steps:
       - name: リポジトリのチェックアウト
