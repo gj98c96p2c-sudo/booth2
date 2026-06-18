@@ -18,29 +18,6 @@ def save_seen_items(seen_ids):
         for item_id in sorted(seen_ids):
             f.write(f"{item_id}\n")
 
-# ★ どんなキー名でタイトルが入っていても自動で探し出す賢い関数
-def judge_and_get_title(item_dict):
-    # 1. ありがちなキー名で完全一致検索
-    for key in ["name", "title", "itemName", "productName", "nameJa", "titleJa", "heading"]:
-        val = item_dict.get(key)
-        if val:
-            if isinstance(val, str): return val
-            if isinstance(val, dict): return next(iter(val.values())) # 辞書型なら中身を取り出す
-
-    # 2. キー名に 'name' や 'title' が含まれる文字列を探す (大文字小文字無視)
-    for key, val in item_dict.items():
-        if ("name" in key.lower() or "title" in key.lower()) and isinstance(val, str) and val.strip():
-            return val.strip()
-
-    # 3. 最終手段：URLや画像、IDっぽくない「2文字以上の普通の文字列」を引っ張り出す
-    for key, val in item_dict.items():
-        if isinstance(val, str) and len(val) >= 2:
-            key_lower = key.lower()
-            if not val.startswith("http") and not any(x in key_lower for x in ["id", "url", "image", "thumb", "path", "locale"]):
-                return val.strip()
-                
-    return "無題のアセット"
-
 def check_vrc_finder():
     print("=== VRC Finder API 監視開始 ===", flush=True)
     if not DISCORD_WEBHOOK_URL:
@@ -78,37 +55,12 @@ def check_vrc_finder():
         return
 
     print(f"📊 取得成功！現在の無料アイテム数: {len(items)}件")
-    
-    # --------------------------------------------------------
-    # 🛠 【デバッグ用】データの構造（キー一覧）をDiscordにこっそり報告
-    # --------------------------------------------------------
-    if items:
-        sample = items[0]
-        inner_sample = sample.get("product") or sample.get("item") or sample
-        keys_list = list(inner_sample.keys())
-        sample_str = str({k: str(v)[:25] for k, v in inner_sample.items()})[:150]
-        try:
-            debug_msg = f"⚙️ [システムログ] キー一覧: {keys_list}\n中身サンプル: {sample_str}"
-            requests.post(DISCORD_WEBHOOK_URL, json={"content": debug_msg}, timeout=10)
-        except:
-            pass
-    # --------------------------------------------------------
 
     items.reverse()
     
     for item in items:
-        inner_item = item.get("product") or item.get("item") or item
-
-        # IDの抽出
-        raw_id = (
-            inner_item.get("id") or 
-            inner_item.get("boothId") or 
-            inner_item.get("booth_id") or 
-            inner_item.get("idInBooth") or
-            inner_item.get("_id")
-        )
-        item_id = str(raw_id).strip() if raw_id is not None else ""
-
+        # VRC Finderのデータ構造（booth_id と ai_title）に完全最適化
+        item_id = str(item.get("booth_id") or "").strip()
         if not item_id or item_id == "None":
             continue
 
@@ -116,13 +68,11 @@ def check_vrc_finder():
         if item_id in seen_ids or item_id in new_seen_ids:
             continue
 
-        # ★ 強化した関数でタイトルを抽出
-        title = judge_and_get_title(inner_item)
+        # タイトルを取得（万が一無ければ予備を探す）
+        title = item.get("ai_title") or item.get("name") or "無題のアセット"
         
-        # URLの抽出
-        booth_url = inner_item.get("boothUrl") or inner_item.get("url") or inner_item.get("link")
-        if not booth_url:
-            booth_url = f"https://vrcfinder.net/ja/products/{item_id}"
+        # 🔗 URLを本家BOOTHの直接リンクに組み立て
+        booth_url = f"https://booth.pm/ja/items/{item_id}"
 
         new_seen_ids.add(item_id)
         print(f"➔ 新着検知: {title} (ID: {item_id})")
