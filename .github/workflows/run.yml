@@ -10,7 +10,6 @@ on:
   schedule:
     - cron: '*/15 * * * *'
 
-# 💡 ここを追加することで、GitHub Actionsに「ファイルを保存する権限」を与えて403エラーを解決します
 permissions:
   contents: write
 
@@ -21,6 +20,9 @@ jobs:
     steps:
       - name: リポジトリのチェックアウト
         uses: actions/checkout@v4
+        with:
+          # 💡 過去の履歴をすべて取得し、安全に合体（プル）できるようにします
+          fetch-depth: 0
 
       - name: Pythonのセットアップ
         uses: actions/setup-python@v5
@@ -44,7 +46,9 @@ jobs:
           git add seen_items.txt
           if ! git diff --cached --quiet; then
             git commit -m "🤖 既読リストの更新 [skip ci]"
-            git push
+            # 💡 送信する直前に、ブラウザで書き換えられた最新のコードを自動で取り込んで安全に合体させます！
+            git pull --rebase origin main
+            git push origin main
           else
             echo "既読リストに変更はありません。"
           fi
