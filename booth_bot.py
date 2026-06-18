@@ -12,19 +12,20 @@ SEEN_FILE = "seen_items.txt"
 # VRChatの新着順・無料除く（全年齢向け）のURL
 BOOTH_URL = "https://booth.pm/ja/search/VRChat?max_price=0&sort=new"
 
-# 【検索のヒント】これが入っていれば通知（最新版にアップデート）
+# 【検索のヒント】これが入っていれば通知（判定を軽くするために大幅に拡充）
 TARGET_KEYWORDS = [
     "VRChat", "VRC", "3Dモデル", "オリジナル", "アバター", "avatar", 
-    "衣装", "素体", "モデル", "キャラクター", "キャラ", "base", "body",
+    "衣装", "服", "ドレス", "スーツ", "制服", "ワンピ", "素体", "モデル", "キャラクター", "キャラ", "base", "body",
+    "髪", "ヘア", "hair", "小物", "アクセ", "ギミック", "アニメーション",
     "アイテクスチャ", "目テクスチャ", "フェイステクスチャ", "顔テクスチャ", 
     "ボディテクスチャ", "肌テクスチャ", "face texture", "eye texture", "body texture"
 ]
 
-# 【除外のヒント】これが入っていたら無視（最新版にアップデート）
+# 【除外のヒント】これが入っていたら無視（テクスチャやスキンによる誤除外を防ぐため削りました）
 IGNORE_KEYWORDS = [
     "ワールド", "world", "家具", "インテリア", "ステージ", "部屋", "ルーム", 
     "ハウス", "背景", "スカイボックス", "bgm", "BGM", "音源", "ボイス", 
-    "楽曲", "テーマ", "パーティクル", "テクスチャ", "texture", "スキン", "skin"
+    "楽曲", "テーマ", "パーティクル"
 ]
 
 # ==========================================
@@ -58,80 +59,4 @@ def check_booth():
 
     # スパム判定回避のためのブラウザ偽装ヘッダー
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
-    }
-
-    try:
-        response = requests.get(BOOTH_URL, headers=headers, timeout=15)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
-        # サイト構造の変更に備えて2パターンのクラスを検索
-        items = soup.find_all("div", class_="l-cards-5col_item") or soup.find_all("li", class_="item-card")
-    except Exception as e:
-        print(f"🚨 BOOTHの取得エラー: {e}")
-        return
-
-    if not seen_links:
-        print("ℹ️ 初回起動のためリストを初期化します。通知は行いません。")
-
-    # 古いものから順に処理し、時系列順にDiscordへ通知させる
-    items.reverse()
-    
-    for item in items:
-        link_tag = item.find("a", href=True)
-        if not link_tag:
-            continue
-        
-        # 1. URLの厳密な整形
-        href = link_tag["href"]
-        if href.startswith("http"):
-            link = href
-        elif href.startswith("//"):
-            link = f"https:{href}"
-        else:
-            link = f"https://booth.pm{href}"
-            
-        # クエリパラメータ（?utm...等）を取り除いた綺麗なURLをベースにする
-        clean_link = link.split("?")[0].strip()
-        
-        # 既読URLならスキップ
-        if clean_link in seen_links:
-            continue
-        
-        # タイトル取得
-        title_tag = item.find(class_="item-card__title") or item.find("h2")
-        title = title_tag.get_text(strip=True) if title_tag else "無題"
-        
-        # 💡【テスト用】何回テストランしても既読リストを上書きしないよう、一時的に無効化しています。
-        # 15分おきの自動運用（本番）にする時は、下の1行の先頭の「#」を消してください。
-        # new_seen_links.add(clean_link)
-
-        # 初回起動時はリストに保存するだけで通知判定はスキップ
-        if not seen_links:
-            continue
-
-        # キーワード判定
-        title_lower = title.lower()
-        is_ignored = any(k.lower() in title_lower for k in IGNORE_KEYWORDS)
-        is_target = any(k.lower() in title_lower for k in TARGET_KEYWORDS)
-        
-        # 条件クリアでDiscordへ送信
-        if not is_ignored and is_target:
-            print(f"➔ 通知対象: {title}")
-            message = {"content": f"【🎁新着】{title}\n{clean_link}"}
-            
-            try:
-                requests.post(DISCORD_WEBHOOK_URL, json=message, timeout=10)
-                time.sleep(1) # Discordの連投制限対策
-            except Exception as e:
-                print(f"🚨 Discord通知エラー: {e}")
-
-    # 💡【テスト用】テストラン中にファイルを更新しないよう、一時的に保存処理を止めています。
-    # 15分おきの自動運用（本番）にする時は、下の2行の先頭の「#」を消してください。
-    # save_seen_items(new_seen_links)
-    
-    print("=== 監視終了 ===", flush=True)
-
-if __name__ == "__main__":
-    check_booth()
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/5
