@@ -5,7 +5,6 @@ import requests
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 SEEN_FILE = "seen_items.txt"
-
 API_URL = "https://vrcfinder.net/api/products?page=0&limit=22&sort=newest&free_only=true"
 
 def load_seen_items():
@@ -56,27 +55,51 @@ def check_vrc_finder():
         return
 
     print(f"📊 取得成功！現在の無料アイテム数: {len(items)}件")
+    
+    # 【デバッグ用】1件目のデータの全キーをログに出して構造を暴く
+    if items:
+        print(f"🛠 [デバッグ] データ1件目の全情報: {items[0]}")
 
-   
-
-    # 本番用のループ処理（古い順に処理）
     items.reverse()
     
     for item in items:
-        item_id = str(item.get("id") or item.get("_id") or item.get("boothId") or "")
-        if not item_id:
+        # ネスト（入れ子）構造対策：もし中に 'product' や 'item' という部屋があればそこを基準にする
+        inner_item = item.get("product") or item.get("item") or item
+
+        # あらゆるIDのキー名候補を片っ端から探す
+        raw_id = (
+            inner_item.get("id") or 
+            inner_item.get("boothId") or 
+            inner_item.get("booth_id") or 
+            inner_item.get("idInBooth") or
+            inner_item.get("_id")
+        )
+        item_id = str(raw_id).strip() if raw_id is not None else ""
+
+        # IDがどうしても取れない場合はスキップ
+        if not item_id or item_id == "None":
             continue
 
+        # 既読チェック
         if item_id in seen_ids or item_id in new_seen_ids:
             continue
 
-        title = item.get("name") or item.get("title") or "無題のアセット"
-        booth_url = item.get("boothUrl") or item.get("url")
+        # あらゆるタイトルのキー名候補を探す
+        title = (
+            inner_item.get("name") or 
+            inner_item.get("title") or 
+            inner_item.get("itemName") or 
+            "無題のアセット"
+        )
+        
+        # あらゆるURLのキー名候補を探す
+        booth_url = inner_item.get("boothUrl") or inner_item.get("url") or inner_item.get("link")
         if not booth_url:
+            # URLがデータ内に無ければ、IDを使ってページURLを生成
             booth_url = f"https://vrcfinder.net/ja/products/{item_id}"
 
         new_seen_ids.add(item_id)
-        print(f"➔ 新着検知: {title}")
+        print(f"➔ 新着検知: {title} (ID: {item_id})")
         
         message = {"content": f"【🎁VRChat無料新着】{title}\n{booth_url}"}
         
