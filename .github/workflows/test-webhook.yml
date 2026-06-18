@@ -1,0 +1,17 @@
+name: Webhook Test
+
+on:
+  workflow_dispatch: # 手動実行用のボタンを出す設定
+
+jobs:
+  test-send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discordへテスト送信
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          # 登録されているURLに直接テストメッセージを送信
+          curl -X POST -H "Content-Type: application/json" \
+            -d '{"content": "🤖 GitHub Actionsからのテスト送信です！これが届けばシークレットの設定は100%成功しています！"}' \
+            "$DISCORD_WEBHOOK_URL"
