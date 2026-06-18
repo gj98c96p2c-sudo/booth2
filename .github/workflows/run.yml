@@ -1,14 +1,19 @@
 name: BOOTH Monitor Bot
 
-# 外部の正確なタイマー（cron-job.org等）からAPI経由で呼び出すため、手動実行トリガーのみを設定
 on:
+  # cron-job.org や手動起動、すべてのトリガーに対応
   workflow_dispatch:
+  repository_dispatch:
+    types: ["*"]
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '*/15 * * * *'
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - name: リポジトリのチェックアウト
@@ -18,22 +23,27 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          # ※requirements.txtがない環境でのエラーを防ぐためキャッシュは無効化
 
       - name: 必要なパッケージのインストール
         run: |
+          python -m pip install --upgrade pip
           pip install requests beautifulsoup4
 
       - name: ボットの実行
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python booth_bot.py
 
       - name: 既読リストの変更を保存 (Commit & Push)
         run: |
-          # GitHub Actionsの公式Botをユーザーとして設定
-          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
           git add seen_items.txt
-          # 変更がある場合のみコミットとプッシュを実行（エラー回避）
-          git diff --staged --quiet || (git commit -m "Update seen items" && git push)
+          # 既読リストに変化があった時だけ保存する（無限ループ防止）
+          if ! git diff --cached --quiet; then
+            git commit -m "🤖 既読リストの更新 [skip ci]"
+            git push
+          else
+            echo "既読リストに変更はありません。"
+          fi
