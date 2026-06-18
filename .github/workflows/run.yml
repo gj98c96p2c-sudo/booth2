@@ -2,37 +2,36 @@ name: VRChat Booth Bot
 
 on:
   schedule:
-    # 🕒 15分おきに自動実行する設定（世界標準時なので日本の時間とはズレて見えますがこれで合っています）
+    # 🕒 15分おきに自動実行する設定
     - cron: '*/15 * * * *'
   workflow_dispatch:
-    # 🛠️ GitHubの画面からいつでも手動でボタンを押してテスト起動できるようにする設定
+    # 🛠️ 手動起動ボタン用
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     
-    # 既読リスト（seen_items.txt）を保存するために、GitHubへの書き込み権限を許可します
     permissions:
       contents: write
 
     steps:
-      # 1. GitHubにあるあなたのプログラム一式をサーバーにダウンロード
+      # 1. リポジトリのダウンロード
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. サーバーにPythonを使えるようにセットアップ
+      # 2. Pythonのセットアップ（★ここを修正しました！）
       - name: Set up Python
-        uses: actions/platform/setup-python@v5
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      # 3. ボットに必要な「requests」というライブラリをインストール
+      # 3. 必要なライブラリをインストール
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
-      # 4. 【超重要】ステップ1で登録した5つの暗号URLを、プログラムに引き渡して実行！
+      # 4. 暗号URLを読み込んで実行
       - name: Run Booth Bot
         env:
           DISCORD_WEBHOOK_URL:     ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -42,12 +41,11 @@ jobs:
           DISCORD_WEBHOOK_WINTER:   ${{ secrets.DISCORD_WEBHOOK_WINTER }}
         run: python booth_bot.py
 
-      # 5. 今回新しく通知したアセット（既読リスト）を保存してGitHubに書き戻す
+      # 5. 既読リストを保存して書き戻す
       - name: Commit and Push seen_items.txt
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          # seen_items.txt に変更（新しい既読）があれば保存する
           if [ -f "seen_items.txt" ]; then
             git add seen_items.txt
             git commit -m "Update seen items [skip ci]" || echo "No changes to commit"
