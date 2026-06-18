@@ -12,8 +12,6 @@ SEEN_FILE = "seen_items.txt"
 BOOTH_URL = "https://booth.pm/ja/search/VRChat?max_price=0&sort=new"
 
 # 【第1の関門】キーワードで即弾くリスト
-# ※「部屋」「ルーム」などは「部屋着」「ルームウェア」を巻き込んで弾くリスクがあります。
-#  もし欲しい服が届かない場合は、ここから「"部屋", "ルーム",」を消してみてください。
 IGNORE_KEYWORDS = [
     "ワールド", "world", "World", "WORLD", "家具", "インテリア", "ステージ", "stage",
     "部屋", "ルーム", "room", "ハウス", "house", "背景", "スカイボックス", "skybox",
@@ -33,23 +31,17 @@ def save_seen_items(seen_ids):
 
 def get_item_description(item_url):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    
-    # 🕵️【負荷対策】詳細ページを見に行く前に1秒待機
     time.sleep(1)
-    
     try:
         res = requests.get(item_url, headers=headers, timeout=10)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, "html.parser")
-            
-            # 🛠️【強化】BOOTHの新しいデザインのタグ名も含めて、幅広く説明文を探す
             desc_tag = (
                 soup.find("div", class_="autolink") or 
                 soup.find("section", class_="item-description") or 
                 soup.find(class_="market-item-detail__description") or
                 soup.find(id="description")
             )
-            
             if desc_tag:
                 return desc_tag.get_text(separator="\n", strip=True)[:1000]
     except:
@@ -73,7 +65,6 @@ def call_gemini_api_json(prompt, max_retries=3):
     for attempt in range(max_retries):
         try:
             res = requests.post(url, headers=headers, json=payload, timeout=15)
-            
             if res.status_code == 200:
                 time.sleep(4)  # 連続リクエスト防止
                 try:
@@ -82,7 +73,6 @@ def call_gemini_api_json(prompt, max_retries=3):
                 except (KeyError, IndexError, json.JSONDecodeError) as e:
                     print(f"⚠️ APIのレスポンス解析またはJSONパースに失敗しました: {e}", flush=True)
                     return None
-                    
             elif res.status_code == 429:
                 print(f"⏳ クォータ制限(429)を検知。{retry_delay}秒待機して再試行します... ({attempt + 1}/{max_retries})", flush=True)
                 time.sleep(retry_delay)
@@ -91,7 +81,6 @@ def call_gemini_api_json(prompt, max_retries=3):
             else:
                 print(f"⚠️ APIエラー (Status: {res.status_code}) - {res.text[:200]}", flush=True)
                 return None
-                
         except Exception as e:
             print(f"⚠️ API通信中に例外が発生しました: {e}", flush=True)
             time.sleep(2)
@@ -105,9 +94,8 @@ def ai_filter_combined(title, description):
         print("⚠️ GEMINI_API_KEY が取得できていません。", flush=True)
         return False
 
-    # 🛠️【安全装置】もしBOOTHの仕様変更等で説明文が空っぽだった場合の特別ルールをプロンプトに追加
     if not description or description.strip() == "":
-        description = "（※重要：システムの都合上、説明文が取得できませんでした。商品タイトルのみから推測して、VRChat向けのアバター・衣装・小物・髪型・ギミック等である可能性が非常に高い場合は、特別にis_targetをtrue、scoreを15点として判定してください。単なるイラストやワールド等の除外対象に見える場合はfalseにしてください。）"
+        description = "（※重要：説明文が取得できませんでした。タイトルから推測してVRChat向けのアバター・衣装等である可能性が高い場合は特別に合格判定にしてください。）"
 
     prompt = f"""
     以下のVRChat向け商品について、審査を行い、指定のJSON形式でのみ出力してください。
@@ -119,7 +107,7 @@ def ai_filter_combined(title, description):
     【ステップ2：20点満点採点】
     ステップ1で対象内（true）となった場合のみ、以下の基準で合計20点満点で採点してください。対象外の場合は一律0点としてください。
     1. 品質・アクセシビリティ（10点満点）
-       - 不自然な海外自動翻訳（日本語崩壊）がないか。今すぐ無料でダウンロードできるか。
+       - 不自然な海外自動翻訳がないか。今すぐ無料でダウンロードできるか。
     2. 導入方法・使い方の充実度（10点満点）
        - アバターへの着せ替え方、Unityでの導入手順、ギミックの使い方が記載されているか。
 
@@ -175,8 +163,23 @@ def check_booth():
     items = soup.find_all("div", class_="l-cards-5col_item") or soup.find_all("div", class_="grid-item") or soup.find_all("li", class_="item-card")
     
     print(f"BOOTH上で見つかった商品ブロック数: {len(items)}件", flush=True)
-    items.reverse()
 
+    # 🛠️【ここが超重要：429エラー完全対策】
+    # 初めて起動した（既読リストが空の）場合は、今ある60件をすべて「既読」にして終了します。
+    if len(seen_ids) == 0:
+        print("💡 初回起動を検知しました。過去の古い商品60件をすべて『確認済み』として保存します。", flush=True)
+        print("💡 これにより、次回（1時間後）から投稿される『本当の新着アイテム』だけを狙い撃ちして、AIエラーを防ぎます！", flush=True)
+        for item in items:
+            link_tag = item.find("a", class_="item-card__title") or item.find("a", href=True)
+            if link_tag and link_tag.get("href"):
+                link = link_tag["href"]
+                item_id = link.split("?")[0].rstrip("/").split("/")[-1]
+                new_seen_ids.add(item_id)
+        save_seen_items(new_seen_ids)
+        print("=== 初回登録が完了しました。次回の自動起動をお楽しみに！ ===", flush=True)
+        return
+
+    items.reverse()
     send_count = 0
     for item in items:
         link_tag = item.find("a", class_="item-card__title") or item.find("a", href=True)
@@ -187,7 +190,6 @@ def check_booth():
         if link.startswith("/"): 
             link = "https://booth.pm" + link
             
-        # 🛠️ URLパラメータを削って純粋なIDを取得
         item_id = link.split("?")[0].rstrip("/").split("/")[-1]
 
         if item_id in seen_ids:
@@ -226,7 +228,6 @@ def check_booth():
         except Exception as e:
             print(f"❌ Discord送信エラー: {e}", flush=True)
         
-        # 🕵️【負荷対策】1つの商品の処理が終わったら1秒待機
         time.sleep(1)
 
     if send_count == 0:
