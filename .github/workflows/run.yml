@@ -1,14 +1,11 @@
-name: BOOTH Monitor Bot
+name: VRC Finder API Monitor Bot
 
 on:
   workflow_dispatch:
   repository_dispatch:
     types: ["*"]
-  push:
-    branches:
-      - main
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/15 * * * *' # 15分おきの爆速検知に復活！
 
 permissions:
   contents: write
@@ -16,12 +13,10 @@ permissions:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-
     steps:
       - name: リポジトリのチェックアウト
         uses: actions/checkout@v4
         with:
-          # 💡 過去の履歴をすべて取得し、安全に合体（プル）できるようにします
           fetch-depth: 0
 
       - name: Pythonのセットアップ
@@ -32,13 +27,14 @@ jobs:
       - name: 必要なパッケージのインストール
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
+          pip install requests
 
       - name: ボットの実行
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python booth_bot.py
 
+      # 今までの完璧なGit Commit & Push機構をそのまま利用
       - name: 既読リストの変更を保存 (Commit & Push)
         run: |
           git config --local user.email "action@github.com"
@@ -46,7 +42,6 @@ jobs:
           git add seen_items.txt
           if ! git diff --cached --quiet; then
             git commit -m "🤖 既読リストの更新 [skip ci]"
-            # 💡 送信する直前に、ブラウザで書き換えられた最新のコードを自動で取り込んで安全に合体させます！
             git pull --rebase origin main
             git push origin main
           else
